@@ -12,3 +12,4 @@ composer.lock
 Thumbs.db
 .cursor/
 .idea/
+.cursorrules
