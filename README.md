@@ -2,9 +2,7 @@
 
 <img src="art/logo.png" alt="Zap Logo" width="200">
 
-# ⚡ Laravel Zap
-
-**Lightning-fast schedule management for Laravel**
+**The missing schedule management for Laravel**
 
 [![PHP Version Require](http://poser.pugx.org/laraveljutsu/zap/require/php)](https://packagist.org/packages/laraveljutsu/zap)
 [![Laravel Version](https://img.shields.io/badge/Laravel-11.0+-FF2D20?style=flat&logo=laravel)](https://laravel.com)
@@ -28,6 +26,7 @@
 - **🔄 Recurring Schedules** - Support for daily, weekly, monthly, and custom patterns
 - **📊 Availability Management** - Intelligent time slot generation and conflict resolution
 - **🎯 Schedule Types** - Availability, appointment, blocked, and custom scheduling types
+- **🔔 Notification Hooks** - Built-in before/after execution notifications with custom support
 - **🧩 Laravel Native** - Facades, service providers, events, and configuration
 - **👩‍💻 Developer Experience** - Fluent API, comprehensive testing, and clear documentation
 
@@ -133,6 +132,216 @@ $schedule = Zap::for($user)
     ->withRule('no_weekends', ['enabled' => false])    // Allow weekend scheduling
     ->withRule('max_duration', ['enabled' => false])   // No duration limits
     ->save();
+```
+
+---
+
+## 🔔 Notification Hooks
+
+Laravel Zap provides built-in notification hooks that send notifications before and after schedule execution, perfect for reminders and completion summaries.
+
+### Basic Notifications
+
+```php
+use Zap\Facades\Zap;
+
+// Send notification before schedule starts
+$schedule = Zap::for($user)
+    ->named('Doctor Appointment')
+    ->from('2025-03-15')
+    ->addPeriod('10:00', '11:00')
+    ->notifyBefore()
+    ->save();
+
+// Send notification after schedule completes
+$schedule = Zap::for($user)
+    ->named('Team Meeting')
+    ->from('2025-03-15')
+    ->addPeriod('14:00', '15:00')
+    ->notifyAfter()
+    ->save();
+
+// Send both before and after notifications
+$schedule = Zap::for($user)
+    ->named('Client Presentation')
+    ->from('2025-03-15')
+    ->addPeriod('09:00', '10:30')
+    ->notifyBefore()
+    ->notifyAfter()
+    ->save();
+```
+
+### Custom Notifications
+
+Use your own notification classes for specialized messaging:
+
+```php
+use App\Notifications\UrgentReminderNotification;
+use App\Notifications\DetailedSummaryNotification;
+
+$schedule = Zap::for($user)
+    ->named('Emergency Surgery')
+    ->from('2025-03-15')
+    ->addPeriod('08:00', '12:00')
+    ->notifyBeforeUsing(new UrgentReminderNotification([
+        'priority' => 'high',
+        'preparation_time' => 30
+    ]))
+    ->notifyAfterUsing(new DetailedSummaryNotification([
+        'include_metrics' => true,
+        'send_to_supervisors' => true
+    ]))
+    ->save();
+```
+
+### Mix Default and Custom Notifications
+
+```php
+$schedule = Zap::for($user)
+    ->named('Weekly Review')
+    ->from('2025-03-15')
+    ->addPeriod('16:00', '17:00')
+    ->notifyBefore() // Uses default ZapStartingNotification
+    ->notifyAfterUsing(new WeeklyReportNotification($reportData))
+    ->save();
+```
+
+### Executing Schedules with Notifications
+
+```php
+// Execute with notification hooks
+$schedule = Zap::for($user)
+    ->named('Data Processing')
+    ->from('2025-03-15')
+    ->addPeriod('02:00', '04:00')
+    ->notifyBefore()
+    ->notifyAfter()
+    ->save();
+
+// Execute with custom callback
+$result = $schedule->execute(function($schedule) {
+    // Your business logic here
+    ProcessData::run();
+    return 'Processing completed successfully';
+});
+
+// Notifications are automatically sent:
+// - Before: "Data Processing starting at 02:00"
+// - After: "Data Processing completed successfully in 2h 15m"
+```
+
+### Default Notification Content
+
+**ZapStartingNotification** (before execution):
+- Schedule name and description
+- Scheduled start time
+- Direct link to view schedule
+- Supports mail, database, and broadcast channels
+
+**ZapCompletedNotification** (after execution):
+- Schedule name and execution status
+- Start time, end time, and duration
+- Success/failure status with error details
+- Execution summary and results
+
+### Creating Custom Notifications
+
+```php
+<?php
+
+namespace App\Notifications;
+
+use Illuminate\Notifications\Notification;
+use Illuminate\Notifications\Messages\MailMessage;
+use Zap\Models\Schedule;
+
+class CustomAppointmentReminder extends Notification
+{
+    public function __construct(
+        public Schedule $schedule,
+        public array $reminderData = []
+    ) {}
+
+    public function via($notifiable)
+    {
+        return ['mail', 'database', 'broadcast'];
+    }
+
+    public function toMail($notifiable)
+    {
+        return (new MailMessage)
+            ->subject("Reminder: {$this->schedule->name}")
+            ->greeting("Hello {$notifiable->name}!")
+            ->line("Your appointment '{$this->schedule->name}' is starting soon.")
+            ->line("Scheduled time: {$this->schedule->start_date->format('M j, Y')} at {$this->schedule->periods->first()->start_time}")
+            ->when($this->reminderData['location'] ?? null, function($mail) {
+                return $mail->line("Location: {$this->reminderData['location']}");
+            })
+            ->action('View Schedule', url("/schedules/{$this->schedule->id}"))
+            ->line('Thank you for using our scheduling system!');
+    }
+
+    public function toArray($notifiable)
+    {
+        return [
+            'schedule_id' => $this->schedule->id,
+            'schedule_name' => $this->schedule->name,
+            'start_time' => $this->schedule->periods->first()->start_time,
+            'reminder_data' => $this->reminderData,
+            'message' => "Reminder: {$this->schedule->name} starting soon"
+        ];
+    }
+}
+```
+
+### Notification Configuration
+
+Configure notification behavior in `config/zap.php`:
+
+```php
+'notifications' => [
+    'enabled' => true,
+    'queue' => true, // Queue notifications for better performance
+    'default_channels' => ['mail', 'database'],
+    'before_notification' => \Zap\Notifications\ZapStartingNotification::class,
+    'after_notification' => \Zap\Notifications\ZapCompletedNotification::class,
+],
+```
+
+### Testing Notifications
+
+```php
+use Illuminate\Support\Facades\Notification;
+
+public function test_schedule_sends_notifications()
+{
+    Notification::fake();
+
+    $schedule = Zap::for($this->user)
+        ->named('Test Meeting')
+        ->from(today())
+        ->addPeriod('14:00', '15:00')
+        ->notifyBefore()
+        ->notifyAfter()
+        ->save();
+
+    // Execute the schedule
+    $schedule->execute(fn() => 'success');
+
+    // Assert notifications were sent
+    Notification::assertSentTo(
+        $this->user,
+        ZapStartingNotification::class
+    );
+
+    Notification::assertSentTo(
+        $this->user,
+        ZapCompletedNotification::class,
+        function ($notification) {
+            return $notification->executionDetails['status'] === 'completed';
+        }
+    );
+}
 ```
 
 ---
@@ -370,6 +579,14 @@ return [
         'max_periods_per_schedule' => 50, // Maximum periods per schedule
         'allow_overlapping_periods' => false, // Allow periods to overlap within same schedule
     ],
+
+    'notifications' => [
+        'enabled' => true,
+        'queue' => true,
+        'default_channels' => ['mail', 'database'],
+        'before_notification' => \Zap\Notifications\ZapStartingNotification::class,
+        'after_notification' => \Zap\Notifications\ZapCompletedNotification::class,
+    ],
 ];
 ```
 
@@ -441,12 +658,14 @@ $lunchBreak = Zap::for($doctor)
     ->weekly(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'])
     ->save();
 
-// Patient appointments
+// Patient appointments with notifications
 $appointment1 = Zap::for($doctor)
     ->named('Patient A - Consultation')
     ->appointment()
     ->from('2025-01-15')
     ->addPeriod('10:00', '11:00')
+    ->notifyBefore() // Reminder notification
+    ->notifyAfter()  // Completion summary
     ->withMetadata(['patient_id' => 1, 'type' => 'consultation'])
     ->save();
 
@@ -455,6 +674,7 @@ $appointment2 = Zap::for($doctor)
     ->appointment()
     ->from('2025-01-15')
     ->addPeriod('15:00', '16:00')
+    ->notifyBeforeUsing(new PatientReminderNotification(['sms' => true]))
     ->withMetadata(['patient_id' => 2, 'type' => 'follow-up'])
     ->save();
 ```
@@ -483,12 +703,14 @@ $maintenance = Zap::for($room)
     ->monthly(['day_of_month' => 1])
     ->save();
 
-// Meeting bookings
+// Meeting bookings with team notifications
 $meeting = Zap::for($room)
     ->named('Board Meeting')
     ->appointment()
     ->from('2025-03-15')
     ->addPeriod('09:00', '11:00')
+    ->notifyBefore() // Setup reminder
+    ->notifyAfterUsing(new MeetingReportNotification(['attendees' => $attendeeList]))
     ->withMetadata([
         'organizer' => 'john@company.com',
         'equipment' => ['projector', 'whiteboard']
@@ -516,6 +738,8 @@ $assignment = Zap::for($employee)
     ->appointment()
     ->from('2025-03-15')
     ->addPeriod('09:00', '12:00')
+    ->notifyBefore() // Shift start reminder
+    ->notifyAfterUsing(new TimesheetNotification(['auto_submit' => true]))
     ->withMetadata(['project_id' => 'alpha', 'priority' => 'high'])
     ->save();
 
@@ -526,6 +750,7 @@ $vacation = Zap::for($employee)
     ->from('2025-06-01')
     ->to('2025-06-15')
     ->addPeriod('00:00', '23:59')
+    ->notifyBeforeUsing(new VacationReminderNotification(['days_before' => 7]))
     ->save();
 ```
 </details>

@@ -4,6 +4,7 @@ namespace Zap\Builders;
 
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Notifications\Notification;
 use Zap\Enums\ScheduleTypes;
 use Zap\Models\Schedule;
 use Zap\Services\ScheduleService;
@@ -12,7 +13,10 @@ class ScheduleBuilder
 {
     private ?Model $schedulable = null;
 
-    private array $attributes = [];
+    private array $attributes = [
+        'notify_before' => false,
+        'notify_after' => false,
+    ];
 
     private array $periods = [];
 
@@ -283,6 +287,84 @@ class ScheduleBuilder
         $this->attributes['is_active'] = true;
 
         return $this;
+    }
+
+    /**
+     * Enable notification before schedule execution.
+     */
+    public function notifyBefore(?int $beforeTime = null): self
+    {
+        $this->attributes['notify_before'] = true;
+        $this->attributes['before_notification_time'] = $beforeTime ?? config('zap.notifications.before_notification_time');
+        $this->attributes['before_notification_class'] = config('zap.notifications.before_notification');
+
+        return $this;
+    }
+
+    /**
+     * Enable notification after schedule execution.
+     */
+    public function notifyAfter(?int $afterTime = null): self
+    {
+        $this->attributes['notify_after'] = true;
+        $this->attributes['after_notification_time'] = $afterTime ?? config('zap.notifications.after_notification_time');
+        $this->attributes['after_notification_class'] = config('zap.notifications.after_notification');
+
+        return $this;
+    }
+
+    /**
+     * Enable notification before schedule execution with custom notification.
+     */
+    public function notifyBeforeUsing(Notification $notification, ?int $beforeTime = null): self
+    {
+        $this->attributes['notify_before'] = true;
+        $this->attributes['before_notification_time'] = $beforeTime ?? config('zap.notifications.before_notification_time');
+        $this->attributes['before_notification_class'] = get_class($notification);
+        $this->attributes['before_notification_data'] = $this->serializeNotification($notification);
+
+        return $this;
+    }
+
+    /**
+     * Enable notification after schedule execution with custom notification.
+     */
+    public function notifyAfterUsing(Notification $notification, ?int $afterTime = null): self
+    {
+        $this->attributes['notify_after'] = true;
+        $this->attributes['after_notification_time'] = $afterTime ?? config('zap.notifications.after_notification_time');
+        $this->attributes['after_notification_class'] = get_class($notification);
+        $this->attributes['after_notification_data'] = $this->serializeNotification($notification);
+
+        return $this;
+    }
+
+    /**
+     * Serialize notification data for storage.
+     */
+    private function serializeNotification(Notification $notification): array
+    {
+        // Extract public properties and constructor parameters
+        $reflection = new \ReflectionClass($notification);
+        $data = [];
+
+        foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+            $data[$property->getName()] = $property->getValue($notification);
+        }
+
+        // If no public properties, try to extract from constructor
+        if (empty($data)) {
+            $constructor = $reflection->getConstructor();
+            if ($constructor) {
+                $params = [];
+                foreach ($constructor->getParameters() as $param) {
+                    $params[$param->getName()] = null;
+                }
+                $data['constructor_params'] = $params;
+            }
+        }
+
+        return $data;
     }
 
     /**

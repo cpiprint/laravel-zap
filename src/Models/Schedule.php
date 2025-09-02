@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Notifications\Notification;
 use Zap\Enums\ScheduleTypes;
 
 /**
@@ -24,6 +25,14 @@ use Zap\Enums\ScheduleTypes;
  * @property array|null $frequency_config
  * @property array|null $metadata
  * @property bool $is_active
+ * @property bool $notify_before
+ * @property bool $notify_after
+ * @property string|int $before_notification_time
+ * @property string|int $after_notification_time
+ * @property string|null $before_notification_class
+ * @property string|null $after_notification_class
+ * @property array|null $before_notification_data
+ * @property array|null $after_notification_data
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property Carbon|null $deleted_at
@@ -49,6 +58,14 @@ class Schedule extends Model
         'frequency_config',
         'metadata',
         'is_active',
+        'notify_before',
+        'notify_after',
+        'before_notification_time',
+        'after_notification_time',
+        'before_notification_class',
+        'after_notification_class',
+        'before_notification_data',
+        'after_notification_data',
     ];
 
     /**
@@ -62,6 +79,12 @@ class Schedule extends Model
         'frequency_config' => 'array',
         'metadata' => 'array',
         'is_active' => 'boolean',
+        'notify_before' => 'boolean',
+        'notify_after' => 'boolean',
+        'before_notification_time' => 'int',
+        'after_notification_time' => 'int',
+        'before_notification_data' => 'array',
+        'after_notification_data' => 'array',
     ];
 
     /**
@@ -280,5 +303,87 @@ class Schedule extends Model
     public function allowsOverlaps(): bool
     {
         return $this->schedule_type->allowsOverlaps();
+    }
+
+    /**
+     * Get the before notification instance.
+     */
+    public function getBeforeNotification(): ?Notification
+    {
+        if (! $this->notify_before || ! $this->before_notification_class) {
+            return null;
+        }
+
+        return $this->instantiateNotification(
+            $this->before_notification_class,
+            $this->before_notification_data ?? []
+        );
+    }
+
+    /**
+     * Get the after notification instance.
+     */
+    public function getAfterNotification(): ?Notification
+    {
+        if (! $this->notify_after || ! $this->after_notification_class) {
+            return null;
+        }
+
+        return $this->instantiateNotification(
+            $this->after_notification_class,
+            $this->after_notification_data ?? []
+        );
+    }
+
+    /**
+     * Instantiate a notification from class name and data.
+     */
+    private function instantiateNotification(string $class, array $data): Notification
+    {
+        if (! class_exists($class)) {
+            throw new \RuntimeException("Notification class {$class} does not exist");
+        }
+
+        // If we have constructor params stored, use them
+        if (isset($data['constructor_params'])) {
+            $reflection = new \ReflectionClass($class);
+            $constructor = $reflection->getConstructor();
+
+            if ($constructor) {
+                $params = [];
+                foreach ($constructor->getParameters() as $param) {
+                    $params[] = $data['constructor_params'][$param->getName()] ?? null;
+                }
+
+                return $reflection->newInstanceArgs($params);
+            }
+        }
+
+        // Try to instantiate with the schedule as parameter
+        return new $class($this);
+    }
+
+    /**
+     * Check if before notifications are enabled.
+     */
+    public function shouldNotifyBefore(): bool
+    {
+        return $this->notify_before && config('zap.notifications.enabled', true);
+    }
+
+    /**
+     * Check if after notifications are enabled.
+     */
+    public function shouldNotifyAfter(): bool
+    {
+        return $this->notify_after && config('zap.notifications.enabled', true);
+    }
+
+    /**
+     * Execute this schedule with notification hooks.
+     */
+    public function execute(?callable $callback = null): mixed
+    {
+        return app(\Zap\Services\ScheduleExecutionService::class)->execute($this, $callback);
     }
 }

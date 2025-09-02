@@ -129,4 +129,22 @@ return [
     'events' => [
         'schedule_created' => true,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notification Settings
+    |--------------------------------------------------------------------------
+    |
+    | Configure notification behavior for schedules.
+    |
+    */
+    'notifications' => [
+        'enabled' => true,
+        'queue' => true,
+        'default_channels' => ['mail', 'database'],
+        'before_notification_time' => 60, // in minutes
+        'after_notification_time' => 5, // in minutes
+        'before_notification' => \Zap\Notifications\ZapStartingNotification::class,
+        'after_notification' => \Zap\Notifications\ZapCompletedNotification::class,
+    ],
 ];
